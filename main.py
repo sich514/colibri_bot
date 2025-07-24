@@ -29,9 +29,6 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 client = OpenAI()  # ключ передаётся через переменные окружения Railway
 
 DB_PATH = "meals.db"
-
-client = OpenAI(api_key=OPENAI_API_KEY)
-
 WHITELIST = [411134984]  # ← твой Telegram ID
 MAX_REQUESTS_PER_DAY = 5
 
