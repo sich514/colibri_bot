@@ -1,4 +1,4 @@
 python-telegram-bot==20.6
-openai==1.12.0
+openai
 Pillow==10.2.0
 python-dotenv==1.0.0
