@@ -1,54 +1,43 @@
-import os
-import io
-import base64
-import datetime
-import sqlite3
+# 👇 Импорт библиотек
+import os, io, base64, datetime, sqlite3
 from dotenv import load_dotenv
 from telegram import (
-    Update,
-    ReplyKeyboardMarkup,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
+    Update, ReplyKeyboardMarkup,
+    InlineKeyboardButton, InlineKeyboardMarkup,
 )
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters,
+    ApplicationBuilder, CommandHandler,
+    MessageHandler, CallbackQueryHandler,
+    ContextTypes, filters,
 )
 from PIL import Image
 from openai import OpenAI
 
-# 🔐 Загрузка ключей
+# 🔐 Загрузка переменных среды
 load_dotenv()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
-client = OpenAI()
+client = OpenAI(api_key=OPENAI_API_KEY)
 DB_PATH = "meals.db"
+WHITELIST = [411134984, 638538033, 242606188, 930120924, 5043733058]
+MAX_TOTAL_REQUESTS = 5
 
-WHITELIST = [411134984, 638538033, 242606188, 930120924, 5043733058]  # 💎 ID без лимитов
-MAX_TOTAL_REQUESTS = 5  # 🔒 Остальным — ограничение
-
-# 🗄️ Инициализация базы
+# 🗄️ Инициализация БД
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""CREATE TABLE IF NOT EXISTS meals (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        date TEXT,
-        calories INTEGER
+        user_id INTEGER, date TEXT, calories INTEGER
     )""")
     cursor.execute("""CREATE TABLE IF NOT EXISTS usage_log (
-        user_id INTEGER PRIMARY KEY,
-        count INTEGER
+        user_id INTEGER PRIMARY KEY, count INTEGER
     )""")
     conn.commit()
     conn.close()
 
+# 📷 Кодировка изображения
 def encode_for_openai(image_bytes: bytes) -> str:
     img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     buffer = io.BytesIO()
@@ -56,9 +45,13 @@ def encode_for_openai(image_bytes: bytes) -> str:
     b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
     return f"data:image/jpeg;base64,{b64}"
 
-# 📸 Фото → OpenAI → Калории
+# 📸 Обработка фото
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    if not update.message.photo:
+        await update.message.reply_text("⚠️ Пожалуйста, отправьте фотографию еды.")
+        return
+
     photo = await update.message.photo[-1].get_file()
     image_bytes = await photo.download_as_bytearray()
     image_url = encode_for_openai(image_bytes)
@@ -66,48 +59,47 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # 💡 Лимит
     if user_id not in WHITELIST:
         cursor.execute("SELECT count FROM usage_log WHERE user_id=?", (user_id,))
         row = cursor.fetchone()
         used = row[0] if row else 0
         if used >= MAX_TOTAL_REQUESTS:
-            await update.message.reply_text("⛔️ Лимит: 15 фото-запросов исчерпан.")
+            await update.message.reply_text("⛔️ Лимит: 5 фото-запросов исчерпан.")
             conn.close()
             return
 
-    # 🔍 Отправка изображения в OpenAI
-    response = client.responses.create(
-        model="gpt-4.1",
-        input=[{
-            "role": "user",
-            "content": [
-                { "type": "input_text", "text": "Если на изображении есть еда — посчитай её калорийность и верни только число. Если еды нет — верни 0." },
-                { "type": "input_image", "image_url": image_url }
-            ]
-        }]
-    )
+    try:
+        response = client.responses.create(
+            model="gpt-4.1",
+            input=[{
+                "role": "user",
+                "content": [
+                    { "type": "input_text", "text": "Если на изображении есть еда — посчитай её калорийность и верни только число. Если еды нет — верни 0." },
+                    { "type": "input_image", "image_url": image_url }
+                ]
+            }]
+        )
+        kcal_raw = getattr(response, "output_text", "").strip()
+        kcal = ''.join(filter(str.isdigit, kcal_raw)) or "0"
+    except Exception as e:
+        kcal = "0"
+        print("OpenAI error:", e)
 
-    kcal_raw = response.output_text.strip()
-    kcal = ''.join(filter(str.isdigit, kcal_raw)) or "0"
-
-    # ⏳ Увеличение счётчика
     if user_id not in WHITELIST:
         if row:
             cursor.execute("UPDATE usage_log SET count=count+1 WHERE user_id=?", (user_id,))
         else:
-            cursor.execute("INSERT INTO usage_log (user_id, count) VALUES (?, 1)")
+            cursor.execute("INSERT INTO usage_log (user_id, count) VALUES (?, ?)", (user_id, 1))
         conn.commit()
 
     conn.close()
 
-    # ✅ Кнопка записи
     callback_data = f"save:{user_id}:{kcal}"
     keyboard = [[InlineKeyboardButton("✅ Записать", callback_data=callback_data)]]
     markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(f"🍽️ Калорийность: {kcal} kcal", reply_markup=markup)
 
-# ✅ Обработка кнопки "Записать"
+# ✅ Кнопка записи
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -119,20 +111,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO meals (user_id, date, calories) VALUES (?, ?, ?)",
-                       (user_id, date, int(kcal)))
+        cursor.execute("INSERT INTO meals (user_id, date, calories) VALUES (?, ?, ?)", (user_id, date, int(kcal)))
         conn.commit()
         conn.close()
 
         await query.edit_message_text(f"✅ Записано: {kcal} kcal ({date})")
 
-# 📊 Стартовое меню
+# 📋 Стартовое меню
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [["📅 Статистика за сегодня"], ["📈 Статистика за все дни"]]
     markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text("📋 Выберите действие:", reply_markup=markup)
 
-# 📊 Текстовая статистика
+# 📊 Обработка текстовых запросов
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
@@ -154,7 +145,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     conn.close()
 
-# 🚀 Запуск
+# 🚀 Запуск бота
 if __name__ == "__main__":
     init_db()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
