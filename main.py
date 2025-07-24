@@ -19,12 +19,15 @@ from telegram.ext import (
     filters,
 )
 from PIL import Image
+import openai
 from openai import OpenAI
 
 # 🔐 Загрузка ключей
-load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+
+client = OpenAI()  # ключ передаётся через переменные окружения Railway
+
 DB_PATH = "meals.db"
 
 client = OpenAI(api_key=OPENAI_API_KEY)
