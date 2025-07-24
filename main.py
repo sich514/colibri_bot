@@ -29,7 +29,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 client = OpenAI()
 DB_PATH = "meals.db"
 
-WHITELIST = [411134984, 638538033, 242606188, 930120924]  # 💎 ID без лимитов
+WHITELIST = [411134984, 638538033, 242606188, 930120924, 5043733058]  # 💎 ID без лимитов
 MAX_TOTAL_REQUESTS = 5  # 🔒 Остальным — ограничение
 
 # 🗄️ Инициализация базы
