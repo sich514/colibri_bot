@@ -21,7 +21,7 @@ from telegram.ext import (
 from PIL import Image
 from openai import OpenAI
 
-# 🔐 Ключи
+# 🔐 Загрузка ключей
 load_dotenv()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -29,8 +29,8 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 client = OpenAI()
 DB_PATH = "meals.db"
 
-WHITELIST = [411134984, 638538033, 242606188, 930120924]  # ← безлимитные ID
-MAX_TOTAL_REQUESTS = 15  # остальным — лимит
+WHITELIST = [411134984, 123456789]  # 💎 ID без лимитов
+MAX_TOTAL_REQUESTS = 15  # 🔒 Остальным — ограничение
 
 # 🗄️ Инициализация базы
 def init_db():
@@ -66,15 +66,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
+    # 💡 Лимит
     if user_id not in WHITELIST:
         cursor.execute("SELECT count FROM usage_log WHERE user_id=?", (user_id,))
         row = cursor.fetchone()
         used = row[0] if row else 0
         if used >= MAX_TOTAL_REQUESTS:
-            await update.message.reply_text("⛔️ Вы использовали все 15 запросов.")
+            await update.message.reply_text("⛔️ Лимит: 15 фото-запросов исчерпан.")
             conn.close()
             return
 
+    # 🔍 Отправка изображения в OpenAI
     response = client.responses.create(
         model="gpt-4.1",
         input=[{
@@ -89,21 +91,23 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kcal_raw = response.output_text.strip()
     kcal = ''.join(filter(str.isdigit, kcal_raw)) or "0"
 
+    # ⏳ Увеличение счётчика
     if user_id not in WHITELIST:
         if row:
             cursor.execute("UPDATE usage_log SET count=count+1 WHERE user_id=?", (user_id,))
         else:
-            cursor.execute("INSERT INTO usage_log (user_id, count) VALUES (?, 1)", (user_id,))
+            cursor.execute("INSERT INTO usage_log (user_id, count) VALUES (?, 1)")
         conn.commit()
 
     conn.close()
 
+    # ✅ Кнопка записи
     callback_data = f"save:{user_id}:{kcal}"
     keyboard = [[InlineKeyboardButton("✅ Записать", callback_data=callback_data)]]
     markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(f"🍽️ Калорийность: {kcal} kcal", reply_markup=markup)
 
-# ✅ Кнопка "Записать"
+# ✅ Обработка кнопки "Записать"
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -122,31 +126,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text(f"✅ Записано: {kcal} kcal ({date})")
 
-# 📊 Текущий статус
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    if user_id in WHITELIST:
-        await update.message.reply_text("✅ Вы в белом списке. Без лимитов.")
-    else:
-        cursor.execute("SELECT count FROM usage_log WHERE user_id=?", (user_id,))
-        used = cursor.fetchone()[0] if cursor.fetchone() else 0
-        left = MAX_TOTAL_REQUESTS - used
-        await update.message.reply_text(f"⏳ Осталось: {left} из {MAX_TOTAL_REQUESTS} запросов.")
-    conn.close()
-
-# 🧭 Стартовое меню
+# 📊 Стартовое меню
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [["📅 Статистика за сегодня"], ["📈 Статистика за все дни"], ["⏳ /status"]]
+    keyboard = [["📅 Статистика за сегодня"], ["📈 Статистика за все дни"]]
     markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text("📋 Выберите действие:", reply_markup=markup)
 
-# 📅 Статистика
+# 📊 Текстовая статистика
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
@@ -169,7 +159,6 @@ if __name__ == "__main__":
     init_db()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("status", status))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
