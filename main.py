@@ -275,7 +275,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "🎯 Указать дневной лимит":
         context.user_data["awaiting_limit"] = True
-        await update.message.reply_text("Введите дневной лимит калорий (только число). Чтобы отключить лимит — введите 0.")
+        await update.message.reply_text("Введи дневной лимит калорий (только число). Чтобы отключить лимит — введи 0.")
         return
 
     elif context.user_data.get("awaiting_limit"):
