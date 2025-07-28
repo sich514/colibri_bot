@@ -118,7 +118,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ⚙️ Запрос к OpenAI
     response = client.responses.create(
-        model="gpt-4.1",
+        model="gpt-4.1-mini",
         input=[{
             "role": "user",
             "content": [
